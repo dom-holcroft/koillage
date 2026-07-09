@@ -15,6 +15,7 @@ export class Pond {
     private app!: Application;
     private fishSchool: Fish[] = [];
     private mouse: Vector2D = new Vector2D(0, 0);
+    private runtimeZoom: number = 1.0;
     private defaultBlueprint: SegmentBlueprint[] = [];
     public fieldGrid!: { bgAngles: Float32Array; bgDistances: Float32Array; fgAngles: Float32Array; fgDistances: Float32Array; cols: number; rows: number };
 
@@ -43,7 +44,7 @@ export class Pond {
 
     constructor() {
         this.mouse.set(window.innerWidth / 2, window.innerHeight / 2);
-        
+
         // Initialize tracks with configuration constants
         Object.keys(this.tokenMap).forEach(key => {
             this.timelines[key] = { curve: 'none', startVal: this.fishConfig[key as keyof FishConfig], endVal: this.fishConfig[key as keyof FishConfig], duration: 4.0, elapsed: 0 };
@@ -75,7 +76,7 @@ export class Pond {
         // DECODE COMPACT PARAMETER STRINGS FROM SHARED INCOMING LINKS
         // =================================================================
         const urlParams = new URLSearchParams(window.location.search);
-        
+
         Object.entries(this.tokenMap).forEach(([key, token]) => {
             if (urlParams.has(token)) {
                 const rawQuadruplet = urlParams.get(token)!;
@@ -174,7 +175,7 @@ export class Pond {
     private syncDOMStateToTimeline(key: string) {
         const cacheEl = document.getElementById(`cache-${key}-curve`) as HTMLInputElement;
         if (!cacheEl) return;
-        
+
         const curve = cacheEl.value as any;
         const startVal = parseFloat((document.getElementById(`input-${key}-start`) as HTMLInputElement).value || "0");
         const endVal = parseFloat((document.getElementById(`input-${key}-end`) as HTMLInputElement).value || "0");
@@ -227,14 +228,15 @@ export class Pond {
             const fish = new Fish(tile.centroidX, tile.centroidY, this.defaultBlueprint, this.fishConfig,
                 { body: tile.primaryColor, fin: tile.secondaryColor, coverage: tile.spotCoverage }, bgScale, this);
             fish.isForeground = false;
-            
+
             // Randomize position vectors if checkbox is active
             if (randomSpawnActive) {
-                const rx = Math.random() * this.app.screen.width;
-                const ry = Math.random() * this.app.screen.height;
+                const rx = Math.random() * 1920; // Use your virtual constant
+                const ry = Math.random() * 1080; // Use your virtual constant
                 fish.joints.forEach(j => { j.x = rx; j.y = ry; });
+                // IMPORTANT: Ensure the fish's home base is also reset to this random pos
             }
-            
+
             this.fishSchool.push(fish);
             this.app.stage.addChild(fish.pixiMesh);
         });
@@ -246,10 +248,11 @@ export class Pond {
             fish.isForeground = true;
 
             if (randomSpawnActive) {
-                const rx = Math.random() * this.app.screen.width;
-                const ry = Math.random() * this.app.screen.height;
-                fish.joints.forEach(j => { j.x = rx; j.y = ry; });
-            }
+    const rx = Math.random() * 1920; // Use your virtual constant
+    const ry = Math.random() * 1080; // Use your virtual constant
+    fish.joints.forEach(j => { j.x = rx; j.y = ry; });
+    // IMPORTANT: Ensure the fish's home base is also reset to this random pos
+}
 
             this.fishSchool.push(fish);
             this.app.stage.addChild(fish.pixiMesh);
@@ -262,8 +265,21 @@ export class Pond {
 
     private setupListeners() {
         window.addEventListener("mousemove", (e) => {
-            this.mouse.set(e.clientX, e.clientY);
+            // Map interactive cursor coordinates relative to our scaling matrix layout
+            const virtualW = 1920; const virtualH = 1080;
+            const scale = Math.min(window.innerWidth / virtualW, window.innerHeight / virtualH) * this.runtimeZoom;
+            const ox = (window.innerWidth - (virtualW * scale)) / 2;
+            const oy = (window.innerHeight - (virtualH * scale)) / 2;
+
+            this.mouse.set((e.clientX - ox) / scale, (e.clientY - oy) / scale);
         });
+
+        // Capture visual scrolling delta movements to scale viewport tracking layers
+        window.addEventListener("wheel", (e) => {
+            this.runtimeZoom += e.deltaY * -0.0008;
+            // Clamp bounds securely so users don't zoom out past oblivion or scale into clipping ranges
+            this.runtimeZoom = Math.max(0.4, Math.min(4.0, this.runtimeZoom));
+        }, { passive: true });
     }
 
     private setupSliders() {
@@ -280,7 +296,7 @@ export class Pond {
                 this.respSchoolWithSliders().catch(e => console.error("Hot update error:", e));
             });
         });
-        
+
         document.getElementById('check-randomSpawn')?.addEventListener('change', () => {
             this.respSchoolWithSliders().catch(e => console.error("Spawn mutation breakdown:", e));
         });
@@ -299,7 +315,7 @@ export class Pond {
 
             params.set('m', mode);
             if (textVal) params.set('t', encodeURIComponent(textVal));
-            if (imgVal)  params.set('i', btoa(imgVal)); 
+            if (imgVal) params.set('i', btoa(imgVal));
             params.set('o', colorMode);
             params.set('r', randomSpawnActive ? "1" : "0");
 
@@ -333,6 +349,8 @@ export class Pond {
 
     private tick(dt: number) {
         const timeDeltaSeconds = dt / 60.0;
+        const virtualW = 1920;
+        const virtualH = 1080;
 
         // =================================================================
         // INDEPENDENT TIMELINE VELOCITY INTERPOLATION LIFECYCLE
@@ -366,17 +384,33 @@ export class Pond {
             }
         });
 
-        const screenW = this.app.screen.width;
-        const screenH = this.app.screen.height;
-        
+
+        const scaleX = window.innerWidth / virtualW;
+        const scaleY = window.innerHeight / virtualH;
+
+        // Fit standard bounds safely to create consistent aspect bars
+        const aspectFitScale = Math.min(scaleX, scaleY);
+        const finalRenderScale = aspectFitScale * this.runtimeZoom;
+
+        const offsetX = (window.innerWidth - (virtualW * finalRenderScale)) / 2;
+        const offsetY = (window.innerHeight - (virtualH * finalRenderScale)) / 2;
+
+        // Apply viewport matrices directly onto the master rendering layer
+        this.app.stage.scale.set(finalRenderScale);
+        this.app.stage.position.set(offsetX, offsetY);
+
+        // =================================================================
+        // SIMULATION STEP: Execute updates inside static coordinate tracks
+        // =================================================================
         const cellSize = this.fishConfig.visualRange;
-        const cols = Math.ceil(screenW / cellSize);
-        const rows = Math.ceil(screenH / cellSize);
+        const cols = Math.ceil(virtualW / cellSize);
+        const rows = Math.ceil(virtualH / cellSize);
 
         const grid: Fish[][] = Array.from({ length: cols * rows }, () => []);
 
         for (let i = 0; i < this.fishSchool.length; i++) {
             const fish = this.fishSchool[i];
+            // Spatial hashing evaluated cleanly against locked 1920 space bounds
             const cellX = Math.max(0, Math.min(cols - 1, Math.floor(fish.headPos.x / cellSize)));
             const cellY = Math.max(0, Math.min(rows - 1, Math.floor(fish.headPos.y / cellSize)));
             grid[cellX + cellY * cols].push(fish);
@@ -384,7 +418,8 @@ export class Pond {
 
         for (let i = 0; i < this.fishSchool.length; i++) {
             const fish = this.fishSchool[i];
-            fish.schooling(grid, screenW, screenH);
+            // Pass virtualW and virtualH limits down to boundary physics logic trackers
+            fish.schooling(grid, virtualW, virtualH);
             fish.move(dt);
         }
     }
