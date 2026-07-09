@@ -9,7 +9,7 @@ export interface TileAnalysis {
 }
 
 export class ImageProcessor {
-    private static DEFAULT_IMAGE = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/President_Barack_Obama.jpg/1280px-President_Barack_Obama.jpg";
+    private static DEFAULT_IMAGE = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1920px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg";
     private static CORS_PROXY = "https://corsproxy.io/?";
 
     private static getTargetImageUrl(): string {

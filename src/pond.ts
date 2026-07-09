@@ -60,7 +60,7 @@ maxSpeed: 8.0,
             });
         }
 
-        const totalFishCount = 1000;
+        const totalFishCount = 1600;
         const screenW = this.app.screen.width;
         const screenH = this.app.screen.height;
 

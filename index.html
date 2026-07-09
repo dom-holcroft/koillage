@@ -16,12 +16,34 @@
             display: block;
         }
 
-        /* Floating Control Panel Layout */
-        #ui-panel {
+        /* Floating Toggle Button Style */
+        #ui-toggle-btn {
             position: absolute;
             top: 15px;
             right: 15px;
-            background: rgba(11, 19, 26, 0.85);
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 11px;
+            cursor: pointer;
+            z-index: 110;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            transition: background 0.2s;
+        }
+
+        #ui-toggle-btn:hover {
+            background: #334155;
+        }
+
+        /* Control Panel Layout (Adjusted top to accommodate button) */
+        #ui-panel {
+            position: absolute;
+            top: 55px;
+            right: 15px;
+            background: rgba(11, 19, 26, 0.9);
             border: 1px solid #233543;
             color: #e2e8f0;
             padding: 16px;
@@ -34,6 +56,14 @@
             flex-direction: column;
             gap: 12px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            transition: opacity 0.2s, transform 0.2s;
+        }
+
+        /* Hidden State Class Modifier */
+        #ui-panel.hidden {
+            opacity: 0;
+            transform: translateY(-10px);
+            pointer-events: none;
         }
 
         .slider-group {
@@ -64,6 +94,8 @@
 </head>
 
 <body>
+    <button id="ui-toggle-btn">🎛️ TOGGLE CONTROLS</button>
+
     <canvas id="pond"></canvas>
 
     <div id="ui-panel">
@@ -104,6 +136,12 @@
             <input type="range" id="slide-mosaicFocus" min="0" max="100" step="1" value="0">
         </div>
     </div>
+
+    <script>
+        document.getElementById('ui-toggle-btn').addEventListener('click', () => {
+            document.getElementById('ui-panel').classList.toggle('hidden');
+        });
+    </script>
 
     <script type="module" src="src/main.ts"></script>
 </body>
