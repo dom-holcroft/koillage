@@ -115,6 +115,7 @@ export class Fish {
     private config: FishConfig;
     private headAngle: number = 0.0;
     private currentScale: number;
+    private pond: any;
 
     private jointSpacings: number[];
     private bodyWidths: number[];
@@ -125,6 +126,9 @@ export class Fish {
     public bodyColor: number[];
     public finColor: number[];
     public spotCoverage: number;
+    
+    // Split State Affiliation Parameters
+    public isForeground: boolean = false;
 
     private latencyCounter: number = 0;
     private latencyInterval: number;
@@ -142,10 +146,12 @@ export class Fish {
         segmentBlueprint: SegmentBlueprint[],
         config: FishConfig,
         colors: { body: number[], fin: number[], coverage: number },
-        scale: number
+        scale: number,
+        pondInstance: any
     ) {
         const radiiCount = segmentBlueprint.length;
         this.config = config;
+        this.pond = pondInstance;
         this.jointSpacings = new Array(radiiCount);
         this.bodyWidths = new Array(radiiCount);
         this.maxAngles = new Array(radiiCount);
@@ -467,7 +473,7 @@ export class Fish {
 
         const visualRange = this.config.visualRange;
         const protectedRange = this.config.protectedRange * this.currentScale;
-        
+
         const visualRangeSq = visualRange * visualRange;
         const protectedRangeSq = protectedRange * protectedRange;
         const MAX_RGB_DIST = Math.sqrt(3);
@@ -476,21 +482,19 @@ export class Fish {
         const dyHome = this.homePos.y - this.headPos.y;
         const distToHome = Math.sqrt(dxHome * dxHome + dyHome * dyHome);
 
-        // =================================================================
-        // DYNAMIC FORCE SCALING: Compute scaled muscle limits for the passes
-        // =================================================================
         let maxForceScaled = this.config.maxForce;
         if (this.config.mosaicFocus > 0 && distToHome < 40.0) {
             const focusScalar = this.config.mosaicFocus / 100.0;
             const closeFactor = distToHome / 40.0;
-            
-            // Interpolate force limits down proportionally with the speed field drop
-            const microForceRatio = 0.25; // 25% steering capacity at zero range
+
+            const microForceRatio = 0.25; 
             const targetForceScale = microForceRatio + (1.0 - microForceRatio) * (1.0 - focusScalar);
             maxForceScaled = this.config.maxForce * (targetForceScale + (1.0 - targetForceScale) * closeFactor);
         }
 
-        // Grid Metric Projections
+        const focusScalar = this.config.mosaicFocus / 100.0;
+        const boidShroudFactor = 1.0 - (focusScalar * 0.82); 
+
         const cellSize = visualRange;
         const cols = Math.ceil(width / cellSize);
         const rows = Math.ceil(height / cellSize);
@@ -527,10 +531,9 @@ export class Fish {
                     const distSq = dx * dx + dy * dy;
 
                     if (distSq > 0) {
-                        // Pass A: Reynolds Separation Check (Using inverted coordinates point away)
                         if (distSq < protectedRangeSq) {
                             const distance = Math.sqrt(distSq);
-                            const pushVector = new Vector2D(this.headPos.x - other.headPos.x, this.headPos.y - other.headPos.y); 
+                            const pushVector = new Vector2D(this.headPos.x - other.headPos.x, this.headPos.y - other.headPos.y);
                             pushVector.normalise().scale(1.0 / distance);
                             sepForce.add(pushVector);
                             sepCount++;
@@ -561,7 +564,6 @@ export class Fish {
             }
         }
 
-        // Apply forces bounded to our dynamic maxForceScaled parameter
         if (sepCount > 0) {
             sepForce.scale(1.0 / sepCount);
             if (sepForce.magnitude() > 0) {
@@ -573,15 +575,10 @@ export class Fish {
 
         if (isCognitiveFrame) {
             if (neighborWeightTotal > 0) {
-                let shroudFactor = 1.0;
-                if (this.config.mosaicFocus > 0 && distToHome < 40.0) {
-                    shroudFactor = Math.max(0.25, distToHome / 40.0);
-                }
-
                 alignSum.scale(1.0 / neighborWeightTotal);
                 if (alignSum.magnitude() > 0) {
                     alignSum.normalise().scale(this.config.maxSpeed * this.currentScale);
-                    const steerAlign = alignSum.sub(this.velocity).limit(maxForceScaled * this.config.alignmentWeight * shroudFactor);
+                    const steerAlign = alignSum.sub(this.velocity).limit(maxForceScaled * this.config.alignmentWeight * boidShroudFactor);
                     this.cachedGroupForce.add(steerAlign);
                 }
 
@@ -592,7 +589,7 @@ export class Fish {
                 if (centerDist > 0) {
                     const easeFactor = Math.min(1.0, centerDist / visualRange);
                     desireCoh.normalise().scale(this.config.maxSpeed * this.currentScale * easeFactor);
-                    const steerCoh = desireCoh.sub(this.velocity).limit(maxForceScaled * this.config.cohesionWeight * shroudFactor);
+                    const steerCoh = desireCoh.sub(this.velocity).limit(maxForceScaled * this.config.cohesionWeight * boidShroudFactor);
                     this.cachedGroupForce.add(steerCoh);
                 }
             } else {
@@ -602,30 +599,40 @@ export class Fish {
 
         this.applyForce(this.cachedGroupForce);
 
-        // =================================================================
-        // PILLAR 1 FIX: Elastic Home Tether with Arrival Dead-Zone
-        // =================================================================
         if (this.config.mosaicFocus > 0 && distToHome > 4.0) {
             const homeTargetDir = new Vector2D(dxHome, dyHome);
-            const focusScalar = this.config.mosaicFocus / 100.0;
-            
-            // Smoothly ease out the attraction speed as the fish glides into deadzone perimeter
             const arrivalEase = Math.min(1.0, (distToHome - 4.0) / 36.0);
             const targetHomeSpeed = Math.min(this.config.maxSpeed, distToHome * 0.08) * focusScalar * arrivalEase;
 
             homeTargetDir.normalise().scale(targetHomeSpeed * this.currentScale);
-            const steerHome = homeTargetDir.sub(this.velocity).limit(maxForceScaled * 1.5 * focusScalar);
+            const steerHome = homeTargetDir.sub(this.velocity).limit(maxForceScaled * 4.0 * focusScalar);
             this.applyForce(steerHome);
         }
 
-        // =================================================================
-        // TURBULENCE: Perpetual wiggle noise remains unscaled for active motion
-        // =================================================================
         if (this.config.noiseScale > 0 && this.velocity.magnitude() > 0.1) {
             const noiseMultiplier = (Math.random() - 0.5) * this.config.noiseScale;
             const lateralWeaveForce = new Vector2D(-this.velocity.y, this.velocity.x);
             lateralWeaveForce.normalise().scale(this.config.maxSpeed * this.currentScale * noiseMultiplier);
             this.applyForce(lateralWeaveForce);
+        }
+
+        const fieldData = this.getBilinearField(this.headPos.x, this.headPos.y);
+
+        const flowVec = new Vector2D(Math.cos(fieldData.angle), Math.sin(fieldData.angle));
+        let maxSpeedScaled = this.config.maxSpeed * this.currentScale;
+        flowVec.scale(maxSpeedScaled);
+        const flowForce = flowVec.sub(this.velocity).limit(maxForceScaled * 1.8 * focusScalar);
+        this.applyForce(flowForce);
+
+        const isForegroundKoi = this.bodyColor[0] > 0.1 || this.bodyColor[1] > 0.1;
+        if (isForegroundKoi && fieldData.distance > 0.0) {
+            const homeDir = new Vector2D(this.homePos.x - this.headPos.x, this.homePos.y - this.headPos.y);
+            if (homeDir.magnitude() > 0) {
+                homeDir.normalise();
+                const fenceStrength = Math.min(3.0, (fieldData.distance * fieldData.distance) * 0.1);
+                const fenceForce = homeDir.scale(maxSpeedScaled * fenceStrength * focusScalar).sub(this.velocity).limit(maxForceScaled * 3.0);
+                this.applyForce(fenceForce);
+            }
         }
     }
 
@@ -651,6 +658,40 @@ export class Fish {
             const depth = (borderPadding - distanceToWall) / borderPadding;
             this.applyForce(new Vector2D(0, -bounceFactor * (depth * depth) * boundaryDampener));
         }
+    }
+
+    private getBilinearField(screenX: number, screenY: number): { angle: number; distance: number } {
+        const grid = this.pond.fieldGrid;
+        if (!grid) return { angle: 0, distance: 0 };
+
+        const normX = (screenX / window.innerWidth) * (grid.cols - 1);
+        const normY = (screenY / window.innerHeight) * (grid.rows - 1);
+
+        const x0 = Math.max(0, Math.min(grid.cols - 1, Math.floor(normX)));
+        const x1 = Math.max(0, Math.min(grid.cols - 1, x0 + 1));
+        const y0 = Math.max(0, Math.min(grid.rows - 1, Math.floor(normY)));
+        const y1 = Math.max(0, Math.min(grid.rows - 1, y0 + 1));
+
+        const tx = normX - x0; const ty = normY - y0;
+
+        const idx00 = y0 * grid.cols + x0; const idx10 = y0 * grid.cols + x1;
+        const idx01 = y1 * grid.cols + x0; const idx11 = y1 * grid.cols + x1;
+
+        // Route references depending on layer flags
+        const distArr = this.isForeground ? grid.fgDistances : grid.bgDistances;
+        const angleArr = this.isForeground ? grid.fgAngles : grid.bgAngles;
+
+        const d00 = distArr[idx00]; const d10 = distArr[idx10];
+        const d01 = distArr[idx01]; const d11 = distArr[idx11];
+        const distance = (1 - tx) * (1 - ty) * d00 + tx * (1 - ty) * d10 + (1 - tx) * ty * d01 + tx * ty * d11;
+
+        const a00 = angleArr[idx00]; const a10 = angleArr[idx10];
+        const a01 = angleArr[idx01]; const a11 = angleArr[idx11];
+
+        const sinTotal = (1 - tx) * (1 - ty) * Math.sin(a00) + tx * (1 - ty) * Math.sin(a10) + (1 - tx) * ty * Math.sin(a01) + tx * ty * Math.sin(a11);
+        const cosTotal = (1 - tx) * (1 - ty) * Math.cos(a00) + tx * (1 - ty) * Math.cos(a10) + (1 - tx) * ty * Math.cos(a01) + tx * ty * Math.cos(a11);
+        
+        return { angle: Math.atan2(sinTotal, cosTotal), distance };
     }
 
     move(dt: number = 1.0) {
@@ -680,8 +721,6 @@ export class Fish {
 
                 maxSpeedScaled = targetMax + (maxSpeedScaled - targetMax) * closeFactor;
                 minSpeedScaled = targetMin + (minSpeedScaled - targetMin) * closeFactor;
-
-                // DYNAMIC FIX: Scale steering muscle down so slow fish make smooth, wide sweeps
                 maxForceScaled = this.config.maxForce * (minSpeedScaled / (this.config.minSpeed * this.currentScale));
             }
         }
