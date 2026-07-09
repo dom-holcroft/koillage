@@ -16,6 +16,8 @@ export interface FieldGrid {
     fgDistances: Float32Array;
     cols: number;
     rows: number;
+    virtualW: number;  
+    virtualH: number;  
 }
 
 export interface AnalysisResult {
@@ -88,26 +90,38 @@ export class ImageProcessor {
     public static async analyze(
         bgCount: number,
         fgCount: number,
-        windowW: number, // Maintained signature for outer loop compatibility
-        windowH: number, // Maintained signature for outer loop compatibility
+        windowW: number, 
+        windowH: number, 
         source: { type: string, value: string, textValue: string, colorMode: string, gradStart: string, gradEnd: string, textSizeMultiplier: number }
     ): Promise<AnalysisResult> {
         const hasBgImage = source.type === 'image' || source.type === 'composite';
         const hasFgText = source.type === 'text' || source.type === 'composite';
 
-        // Fix aspect ratio to a locked global viewport coordinates space
-        const virtualW = 1920;
-        const virtualH = 1080;
+        // Establish uniform default layout coordinate spaces
+        let virtualW = 1920;
+        let virtualH = 1080;
+        let img: HTMLImageElement | null = null;
 
-        // 1. Build Virtual Aspect Backdrop Canvas Layer
+        if (hasBgImage) {
+            const imgUrl = (source.value && source.value.startsWith('http')) ? source.value : this.DEFAULT_IMAGE;
+            img = await this.loadImage(imgUrl);
+
+            const maxResolutionCeiling = 2000;
+            virtualW = img.naturalWidth;
+            virtualH = img.naturalHeight;
+
+            if (virtualW > maxResolutionCeiling || virtualH > maxResolutionCeiling) {
+                const scaleFactor = maxResolutionCeiling / Math.max(virtualW, virtualH);
+                virtualW = Math.round(virtualW * scaleFactor);
+                virtualH = Math.round(virtualH * scaleFactor);
+            }
+        }
+
         const bgCanvas = document.createElement("canvas");
         bgCanvas.width = virtualW; bgCanvas.height = virtualH;
         const bgCtx = bgCanvas.getContext("2d", { willReadFrequently: true })!;
 
-        if (hasBgImage) {
-            const imgUrl = (source.value && source.value.startsWith('http')) ? source.value : this.DEFAULT_IMAGE;
-            const img = await this.loadImage(imgUrl);
-            // Draw scaled cleanly to fit our absolute 1920x1080 layer bounds
+        if (hasBgImage && img) {
             bgCtx.drawImage(img, 0, 0, virtualW, virtualH);
         } else {
             bgCtx.fillStyle = "#0b131a";
@@ -128,7 +142,6 @@ export class ImageProcessor {
             const lines = textString.split("\\n");
             const maxLineLen = Math.max(...lines.map(l => l.length), 1);
             
-            // Text measurements evaluated relative to absolute virtual workspace dimensions
             const optimalAutoFontSize = Math.min((virtualW / maxLineLen) * 1.2, (virtualH / (lines.length * 1.4)) * 0.75);
             const fontSize = optimalAutoFontSize * source.textSizeMultiplier;
 
@@ -144,9 +157,6 @@ export class ImageProcessor {
         }
         const highResTextData = textCtx.getImageData(0, 0, virtualW, virtualH).data;
 
-        // =================================================================
-        // DOWNSAMPLED GRID PROCESSING PASS ($128 \times 128$)
-        // =================================================================
         const fCols = 128, fRows = 128;
         
         const lowResBgCanvas = document.createElement("canvas");
@@ -171,7 +181,6 @@ export class ImageProcessor {
             return (0.299 * data[offset]) + (0.587 * data[offset + 1]) + (0.114 * data[offset + 2]);
         };
 
-        // Pass A: Build Image Background Flow Orientations
         for (let r = 0; r < fRows; r++) {
             for (let c = 0; c < fCols; c++) {
                 const idx = r * fCols + c;
@@ -189,7 +198,6 @@ export class ImageProcessor {
             }
         }
 
-        // Pass B: Build Typography SDF Bounds
         for (let r = 0; r < fRows; r++) {
             for (let c = 0; c < fCols; c++) {
                 const idx = r * fCols + c;
@@ -212,7 +220,6 @@ export class ImageProcessor {
             }
         }
 
-        // Pass C: Map Contour Flow Tangents from SDF slopes
         for (let r = 0; r < fRows; r++) {
             for (let c = 0; c < fCols; c++) {
                 const idx = r * fCols + c;
@@ -230,15 +237,11 @@ export class ImageProcessor {
             }
         }
 
-        // =================================================================
-        // SUB-SCHOOL SAMPLING LABELS GENERATOR
-        // =================================================================
         const bgAnalyses: TileAnalysis[] = [];
         const fgAnalyses: TileAnalysis[] = [];
         const rStart = this.hexToRgb(source.gradStart);
         const rEnd = this.hexToRgb(source.gradEnd);
 
-        // Grid-Slice Allocation: Background Image School
         if (hasBgImage) {
             const columns = Math.ceil(Math.sqrt(bgCount));
             const rows = Math.ceil(bgCount / columns);
@@ -253,7 +256,6 @@ export class ImageProcessor {
                     if (bgAnalyses.length >= bgCount) break;
                     const sx = c * tileW; const sy = r * tileH;
                     const cx = sx + tileW / 2; const cy = sy + tileH / 2;
-                    // Read data positions relative to locked 1920 workspace limits
                     const hIdx = (Math.floor(cy) * virtualW + Math.floor(cx)) * 4;
 
                     if (highResBgData[hIdx + 3] < 50) continue;
@@ -284,7 +286,6 @@ export class ImageProcessor {
             }
         }
 
-        // Random-Walk Spawning: Foreground Text School
         if (hasFgText) {
             const validTextCoords: { x: number, y: number }[] = [];
             for (let y = 0; y < virtualH; y += 4) {
@@ -315,7 +316,7 @@ export class ImageProcessor {
 
         return {
             bgAnalyses, fgAnalyses,
-            fieldGrid: { bgAngles, bgDistances, fgAngles, fgDistances, cols: fCols, rows: fRows }
+            fieldGrid: { bgAngles, bgDistances, fgAngles, fgDistances, cols: fCols, rows: fRows, virtualW, virtualH }
         };
     }
 }
