@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Koi Mosaic</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0b131a;
+            user-select: none;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* Floating Control Panel Layout */
+        #ui-panel {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(11, 19, 26, 0.85);
+            border: 1px solid #233543;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 11px;
+            z-index: 100;
+            width: 240px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #94a3b8;
+        }
+
+        .slider-label span:last-child {
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="pond"></canvas>
+
+    <div id="ui-panel">
+        <div class="slider-group">
+            <div class="slider-label"><span>Visual Range</span><span id="val-visualRange">80</span></div>
+            <input type="range" id="slide-visualRange" min="10" max="300" step="5" value="80">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Protected Range</span><span id="val-protectedRange">25</span></div>
+            <input type="range" id="slide-protectedRange" min="2" max="100" step="1" value="25">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Separation Weight</span><span id="val-separationWeight">1.6</span></div>
+            <input type="range" id="slide-separationWeight" min="0" max="4" step="0.05" value="1.6">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Alignment Weight</span><span id="val-alignmentWeight">0.35</span></div>
+            <input type="range" id="slide-alignmentWeight" min="0" max="2" step="0.05" value="0.35">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Cohesion Weight</span><span id="val-cohesionWeight">0.25</span></div>
+            <input type="range" id="slide-cohesionWeight" min="0" max="2" step="0.05" value="0.25">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Max Speed</span><span id="val-maxSpeed">8.0</span></div>
+            <input type="range" id="slide-maxSpeed" min="1" max="20" step="0.5" value="8.0">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Min Speed</span><span id="val-minSpeed">3.0</span></div>
+            <input type="range" id="slide-minSpeed" min="0" max="10" step="0.5" value="3.0">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Color Affinity</span><span id="val-affinityStrength">50</span></div>
+            <input type="range" id="slide-affinityStrength" min="0" max="100" step="1" value="50">
+        </div>
+        <div class="slider-group">
+            <div class="slider-label"><span>Mosaic Focus</span><span id="val-mosaicFocus">0</span></div>
+            <input type="range" id="slide-mosaicFocus" min="0" max="100" step="1" value="0">
+        </div>
+    </div>
+
+    <script type="module" src="src/main.ts"></script>
+</body>
+
+</html>
