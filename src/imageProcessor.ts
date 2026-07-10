@@ -16,8 +16,8 @@ export interface FieldGrid {
     fgDistances: Float32Array;
     cols: number;
     rows: number;
-    virtualW: number;  
-    virtualH: number;  
+    virtualW: number;
+    virtualH: number;
 }
 
 export interface AnalysisResult {
@@ -90,8 +90,8 @@ export class ImageProcessor {
     public static async analyze(
         bgCount: number,
         fgCount: number,
-        windowW: number, 
-        windowH: number, 
+        windowW: number,
+        windowH: number,
         source: { type: string, value: string, textValue: string, colorMode: string, gradStart: string, gradEnd: string, textSizeMultiplier: number }
     ): Promise<AnalysisResult> {
         const hasBgImage = source.type === 'image' || source.type === 'composite';
@@ -141,7 +141,7 @@ export class ImageProcessor {
             const textString = source.textValue || "KOI";
             const lines = textString.split("\\n");
             const maxLineLen = Math.max(...lines.map(l => l.length), 1);
-            
+
             const optimalAutoFontSize = Math.min((virtualW / maxLineLen) * 1.2, (virtualH / (lines.length * 1.4)) * 0.75);
             const fontSize = optimalAutoFontSize * source.textSizeMultiplier;
 
@@ -158,7 +158,7 @@ export class ImageProcessor {
         const highResTextData = textCtx.getImageData(0, 0, virtualW, virtualH).data;
 
         const fCols = 128, fRows = 128;
-        
+
         const lowResBgCanvas = document.createElement("canvas");
         lowResBgCanvas.width = fCols; lowResBgCanvas.height = fRows;
         const lowResBgCtx = lowResBgCanvas.getContext("2d")!;
@@ -184,17 +184,19 @@ export class ImageProcessor {
         for (let r = 0; r < fRows; r++) {
             for (let c = 0; c < fCols; c++) {
                 const idx = r * fCols + c;
-                const cLeft  = c > 0 ? (r * fCols + (c - 1)) * 4 : idx * 4;
+                const cLeft = c > 0 ? (r * fCols + (c - 1)) * 4 : idx * 4;
                 const cRight = c < fCols - 1 ? (r * fCols + (c + 1)) * 4 : idx * 4;
-                const rTop   = r > 0 ? ((r - 1) * fCols + c) * 4 : idx * 4;
-                const rBot   = r < fRows - 1 ? ((r + 1) * fCols + c) * 4 : idx * 4;
+                const rTop = r > 0 ? ((r - 1) * fCols + c) * 4 : idx * 4;
+                const rBot = r < fRows - 1 ? ((r + 1) * fCols + c) * 4 : idx * 4;
 
                 const gradX = getLuminance(cRight, fBgData) - getLuminance(cLeft, fBgData);
                 const gradY = getLuminance(rBot, fBgData) - getLuminance(rTop, fBgData);
-                
+
                 bgAngles[idx] = Math.atan2(gradX, -gradY);
                 bgDistances[idx] = 0;
                 isTextEdge[idx] = fTextData[idx * 4] > 100 ? 1 : 0;
+                const edgeMag = Math.sqrt(gradX * gradX + gradY * gradY);
+                bgDistances[idx] = Math.min(1.0, edgeMag / 150.0);
             }
         }
 
@@ -223,14 +225,14 @@ export class ImageProcessor {
         for (let r = 0; r < fRows; r++) {
             for (let c = 0; c < fCols; c++) {
                 const idx = r * fCols + c;
-                const cLeft  = c > 0 ? (r * fCols + (c - 1)) : idx;
+                const cLeft = c > 0 ? (r * fCols + (c - 1)) : idx;
                 const cRight = c < fCols - 1 ? (r * fCols + (c + 1)) : idx;
-                const rTop   = r > 0 ? ((r - 1) * fCols + c) : idx;
-                const rBot   = r < fRows - 1 ? ((r + 1) * fCols + c) : idx;
+                const rTop = r > 0 ? ((r - 1) * fCols + c) : idx;
+                const rBot = r < fRows - 1 ? ((r + 1) * fCols + c) : idx;
 
                 const gradX = fgDistances[cRight] - fgDistances[cLeft];
                 const gradY = fgDistances[rBot] - fgDistances[rTop];
-                
+
                 const continuousDoubledAngle = Math.atan2(gradX, -gradY) * 2.0;
                 let sinSum = Math.sin(continuousDoubledAngle), cosSum = Math.cos(continuousDoubledAngle);
                 fgAngles[idx] = Math.atan2(sinSum, cosSum) / 2.0;
@@ -272,7 +274,7 @@ export class ImageProcessor {
                             }).sort((a, b) => b.score - a.score);
 
                             pCol = [scored[0].sw.rgb().r / 255, scored[0].sw.rgb().g / 255, scored[0].sw.rgb().b / 255];
-                            sCol = scored.length > 1 
+                            sCol = scored.length > 1
                                 ? [scored[1].sw.rgb().r / 255, scored[1].sw.rgb().g / 255, scored[1].sw.rgb().b / 255]
                                 : [pCol[0] * 0.45, pCol[1] * 0.45, pCol[2] * 0.45];
                         }

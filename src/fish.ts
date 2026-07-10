@@ -126,7 +126,7 @@ export class Fish {
     public bodyColor: number[];
     public finColor: number[];
     public spotCoverage: number;
-    
+
     // Split State Affiliation Parameters
     public isForeground: boolean = false;
 
@@ -483,17 +483,9 @@ export class Fish {
         const distToHome = Math.sqrt(dxHome * dxHome + dyHome * dyHome);
 
         let maxForceScaled = this.config.maxForce;
-        if (this.config.mosaicFocus > 0 && distToHome < 40.0) {
-            const focusScalar = this.config.mosaicFocus / 100.0;
-            const closeFactor = distToHome / 40.0;
-
-            const microForceRatio = 0.25; 
-            const targetForceScale = microForceRatio + (1.0 - microForceRatio) * (1.0 - focusScalar);
-            maxForceScaled = this.config.maxForce * (targetForceScale + (1.0 - targetForceScale) * closeFactor);
-        }
 
         const focusScalar = this.config.mosaicFocus / 100.0;
-        const boidShroudFactor = 1.0 - (focusScalar * 0.82); 
+        const boidShroudFactor = 1.0 - (focusScalar * 0.82);
 
         const cellSize = visualRange;
         const cols = Math.ceil(width / cellSize);
@@ -531,26 +523,36 @@ export class Fish {
                     const distSq = dx * dx + dy * dy;
 
                     if (distSq > 0) {
-                        if (distSq < protectedRangeSq) {
+                        // Compute color variables globally inside the neighborhood loop
+                        const dR1 = this.bodyColor[0] - other.bodyColor[0];
+                        const dG1 = this.bodyColor[1] - other.bodyColor[1];
+                        const dB1 = this.bodyColor[2] - other.bodyColor[2];
+                        const bodyMatch = 1.0 - (Math.sqrt(dR1 * dR1 + dG1 * dG1 + dB1 * dB1) / MAX_RGB_DIST);
+
+                        const dR2 = this.finColor[0] - other.finColor[0];
+                        const dG2 = this.finColor[1] - other.finColor[1];
+                        const dB2 = this.finColor[2] - other.finColor[2];
+                        const finMatch = 1.0 - (Math.sqrt(dR2 * dR2 + dG2 * dG2 + dB2 * dB2) / MAX_RGB_DIST);
+
+                        const totalColorMatch = (bodyMatch * (1.0 - this.spotCoverage)) + (finMatch * this.spotCoverage);
+                        const colorMismatch = 1.0 - totalColorMatch;
+
+                        const dynamicProtectedRangeSq = protectedRangeSq * (1.0 + colorMismatch * 3.0 * focusScalar);
+
+                        if (distSq < dynamicProtectedRangeSq) {
                             const distance = Math.sqrt(distSq);
                             const pushVector = new Vector2D(this.headPos.x - other.headPos.x, this.headPos.y - other.headPos.y);
                             pushVector.normalise().scale(1.0 / distance);
+                            
+                            if (colorMismatch > 0.2) {
+                                pushVector.scale(1.0 + colorMismatch * 2.0 * focusScalar);
+                            }
+                            
                             sepForce.add(pushVector);
                             sepCount++;
                         }
 
                         if (isCognitiveFrame && distSq < visualRangeSq) {
-                            const dR1 = this.bodyColor[0] - other.bodyColor[0];
-                            const dG1 = this.bodyColor[1] - other.bodyColor[1];
-                            const dB1 = this.bodyColor[2] - other.bodyColor[2];
-                            const bodyMatch = 1.0 - (Math.sqrt(dR1 * dR1 + dG1 * dG1 + dB1 * dB1) / MAX_RGB_DIST);
-
-                            const dR2 = this.finColor[0] - other.finColor[0];
-                            const dG2 = this.finColor[1] - other.finColor[1];
-                            const dB2 = this.finColor[2] - other.finColor[2];
-                            const finMatch = 1.0 - (Math.sqrt(dR2 * dR2 + dG2 * dG2 + dB2 * dB2) / MAX_RGB_DIST);
-
-                            const totalColorMatch = (bodyMatch * (1.0 - this.spotCoverage)) + (finMatch * this.spotCoverage);
                             const affinity = Math.pow(totalColorMatch, 1.0 + (this.config.affinityStrength / 100.0) * 6.0);
 
                             if (affinity > 0.01) {
@@ -601,18 +603,17 @@ export class Fish {
 
         if (this.config.mosaicFocus > 0 && distToHome > 4.0) {
             const homeTargetDir = new Vector2D(dxHome, dyHome);
-            const arrivalEase = Math.min(1.0, (distToHome - 4.0) / 36.0);
-            const targetHomeSpeed = Math.min(this.config.maxSpeed, distToHome * 0.08) * focusScalar * arrivalEase;
-
-            homeTargetDir.normalise().scale(targetHomeSpeed * this.currentScale);
-            const steerHome = homeTargetDir.sub(this.velocity).limit(maxForceScaled * 4.0 * focusScalar);
+            
+            const tetherFactor = Math.pow(Math.min(1.0, distToHome / 45.0), 3) * focusScalar;
+            const steerHome = homeTargetDir.normalise().scale(this.config.maxSpeed * this.currentScale).sub(this.velocity).limit(maxForceScaled * 4.0 * tetherFactor);
             this.applyForce(steerHome);
         }
 
         if (this.config.noiseScale > 0 && this.velocity.magnitude() > 0.1) {
             const noiseMultiplier = (Math.random() - 0.5) * this.config.noiseScale;
             const lateralWeaveForce = new Vector2D(-this.velocity.y, this.velocity.x);
-            lateralWeaveForce.normalise().scale(this.config.maxSpeed * this.currentScale * noiseMultiplier);
+            const noiseDampener = 1.0 - focusScalar;
+            lateralWeaveForce.normalise().scale(this.config.maxSpeed * this.currentScale * noiseMultiplier * noiseDampener);
             this.applyForce(lateralWeaveForce);
         }
 
@@ -624,13 +625,12 @@ export class Fish {
         const flowForce = flowVec.sub(this.velocity).limit(maxForceScaled * 1.8 * focusScalar);
         this.applyForce(flowForce);
 
-        const isForegroundKoi = this.bodyColor[0] > 0.1 || this.bodyColor[1] > 0.1;
-        if (isForegroundKoi && fieldData.distance > 0.0) {
+        if (fieldData.distance > 0.0) {
             const homeDir = new Vector2D(this.homePos.x - this.headPos.x, this.homePos.y - this.headPos.y);
             if (homeDir.magnitude() > 0) {
                 homeDir.normalise();
-                const fenceStrength = Math.min(3.0, (fieldData.distance * fieldData.distance) * 0.1);
-                const fenceForce = homeDir.scale(maxSpeedScaled * fenceStrength * focusScalar).sub(this.velocity).limit(maxForceScaled * 3.0);
+                const edgePush = Math.pow(fieldData.distance, 6) * 6.0 * focusScalar;
+                const fenceForce = homeDir.scale(maxSpeedScaled * edgePush).sub(this.velocity).limit(maxForceScaled * 4.0);
                 this.applyForce(fenceForce);
             }
         }
@@ -664,8 +664,8 @@ export class Fish {
         const grid = this.pond.fieldGrid;
         if (!grid) return { angle: 0, distance: 0 };
 
-        const normX = (screenX / window.innerWidth) * (grid.cols - 1);
-        const normY = (screenY / window.innerHeight) * (grid.rows - 1);
+        const normX = (screenX / this.pond.fieldGrid.virtualW) * (grid.cols - 1);
+        const normY = (screenY / this.pond.fieldGrid.virtualH) * (grid.rows - 1);
 
         const x0 = Math.max(0, Math.min(grid.cols - 1, Math.floor(normX)));
         const x1 = Math.max(0, Math.min(grid.cols - 1, x0 + 1));
@@ -677,7 +677,6 @@ export class Fish {
         const idx00 = y0 * grid.cols + x0; const idx10 = y0 * grid.cols + x1;
         const idx01 = y1 * grid.cols + x0; const idx11 = y1 * grid.cols + x1;
 
-        // Route references depending on layer flags
         const distArr = this.isForeground ? grid.fgDistances : grid.bgDistances;
         const angleArr = this.isForeground ? grid.fgAngles : grid.bgAngles;
 
@@ -690,7 +689,7 @@ export class Fish {
 
         const sinTotal = (1 - tx) * (1 - ty) * Math.sin(a00) + tx * (1 - ty) * Math.sin(a10) + (1 - tx) * ty * Math.sin(a01) + tx * ty * Math.sin(a11);
         const cosTotal = (1 - tx) * (1 - ty) * Math.cos(a00) + tx * (1 - ty) * Math.cos(a10) + (1 - tx) * ty * Math.cos(a01) + tx * ty * Math.cos(a11);
-        
+
         return { angle: Math.atan2(sinTotal, cosTotal), distance };
     }
 
