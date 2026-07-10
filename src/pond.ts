@@ -19,10 +19,19 @@ export class Pond {
     private defaultBlueprint: SegmentBlueprint[] = [];
     public fieldGrid!: { bgAngles: Float32Array; bgDistances: Float32Array; fgAngles: Float32Array; fgDistances: Float32Array; cols: number; rows: number; virtualW: number; virtualH: number };
 
-    // Layout tracking elements cache for tracking accurate mouse events across transformations
+    // Layout tracking elements cache for tracking accurate mouse events across transformation
+
     private currentScale: number = 1.0;
     private currentOffsetX: number = 0;
     private currentOffsetY: number = 0;
+
+    // --- ADD THESE INTERACTION STATE FIELDS ---
+    private panX: number = 0;
+    private panY: number = 0;
+    private isDragging: boolean = false;
+    private lastPointerX: number = 0;
+    private lastPointerY: number = 0;
+    private lastTouchDist: number = 0;
 
     private fishConfig: FishConfig = {
         visualRange: 45.0,
@@ -230,8 +239,8 @@ export class Pond {
             fish.isForeground = false;
 
             if (randomSpawnActive) {
-                const rx = Math.random() * vW; 
-                const ry = Math.random() * vH; 
+                const rx = Math.random() * vW;
+                const ry = Math.random() * vH;
                 fish.joints.forEach(j => { j.x = rx; j.y = ry; });
             }
 
@@ -245,8 +254,8 @@ export class Pond {
             fish.isForeground = true;
 
             if (randomSpawnActive) {
-                const rx = Math.random() * vW; 
-                const ry = Math.random() * vH; 
+                const rx = Math.random() * vW;
+                const ry = Math.random() * vH;
                 fish.joints.forEach(j => { j.x = rx; j.y = ry; });
             }
 
@@ -260,17 +269,74 @@ export class Pond {
     }
 
     private setupListeners() {
-        window.addEventListener("mousemove", (e) => {
+        // Intercept scroll wheel events
+        window.addEventListener("wheel", (e) => {
+            // If scrolling inside configuration menu, let the browser handle it naturally
+            if ((e.target as HTMLElement).closest('#config-view, #toggle-btn')) {
+                return;
+            }
+
+            this.runtimeZoom += e.deltaY * -0.0008;
+            this.runtimeZoom = Math.max(0.4, Math.min(4.0, this.runtimeZoom));
+        }, { passive: false });
+
+        // Unified Pointer down handler (Mouse & Touch)
+        window.addEventListener("pointerdown", (e) => {
+            if ((e.target as HTMLElement).closest('#config-view, #toggle-btn')) return;
+
+            this.isDragging = true;
+            this.lastPointerX = e.clientX;
+            this.lastPointerY = e.clientY;
+        });
+
+        // Unified Pointer move handler
+        window.addEventListener("pointermove", (e) => {
+            if (this.isDragging) {
+                const dx = e.clientX - this.lastPointerX;
+                const dy = e.clientY - this.lastPointerY;
+
+                this.panX += dx;
+                this.panY += dy;
+
+                this.lastPointerX = e.clientX;
+                this.lastPointerY = e.clientY;
+            }
+
             // Unproject global coordinates down into relative local canvas coordinates
             const mx = (e.clientX - this.currentOffsetX) / this.currentScale;
             const my = (e.clientY - this.currentOffsetY) / this.currentScale;
             this.mouse.set(mx, my);
         });
 
-        window.addEventListener("wheel", (e) => {
-            this.runtimeZoom += e.deltaY * -0.0008;
-            this.runtimeZoom = Math.max(0.4, Math.min(4.0, this.runtimeZoom));
+        // Unified Pointer up / cancel handler
+        const stopDragging = () => {
+            this.isDragging = false;
+        };
+        window.addEventListener("pointerup", stopDragging);
+        window.addEventListener("pointercancel", stopDragging);
+
+        // Mobile Native Pinch-to-Zoom handling
+        window.addEventListener("touchmove", (e) => {
+            if ((e.target as HTMLElement).closest('#config-view, #toggle-btn')) return;
+
+            if (e.touches.length === 2) {
+                this.isDragging = false; // Kill pan drift to avoid jumping during pinch transitions
+
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (this.lastTouchDist > 0) {
+                    const factor = dist / this.lastTouchDist;
+                    this.runtimeZoom = Math.max(0.4, Math.min(4.0, this.runtimeZoom * factor));
+                }
+                this.lastTouchDist = dist;
+            }
         }, { passive: true });
+
+        window.addEventListener("touchend", () => {
+            this.lastTouchDist = 0;
+        });
     }
 
     private setupSliders() {
@@ -340,7 +406,7 @@ export class Pond {
 
     private tick(dt: number) {
         const timeDeltaSeconds = dt / 60.0;
-        
+
         const virtualW = this.fieldGrid?.virtualW || 1920;
         const virtualH = this.fieldGrid?.virtualH || 1080;
 
@@ -376,15 +442,20 @@ export class Pond {
             }
         });
 
+        if (!this.isDragging) {
+            this.panX += (0 - this.panX) * 0.08 * dt;
+            this.panY += (0 - this.panY) * 0.08 * dt;
+        }
+
         const scaleX = window.innerWidth / virtualW;
         const scaleY = window.innerHeight / virtualH;
-
-        // Aspect fit contain scaling logic
         const aspectFitScale = Math.min(scaleX, scaleY);
-        
+
         this.currentScale = aspectFitScale * this.runtimeZoom;
-        this.currentOffsetX = (window.innerWidth - (virtualW * this.currentScale)) / 2;
-        this.currentOffsetY = (window.innerHeight - (virtualH * this.currentScale)) / 2;
+
+        // Inject pan coordinates straight into viewport transform offsets
+        this.currentOffsetX = (window.innerWidth - (virtualW * this.currentScale)) / 2 + this.panX;
+        this.currentOffsetY = (window.innerHeight - (virtualH * this.currentScale)) / 2 + this.panY;
 
         this.app.stage.scale.set(this.currentScale);
         this.app.stage.position.set(this.currentOffsetX, this.currentOffsetY);

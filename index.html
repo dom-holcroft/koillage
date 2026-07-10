@@ -47,13 +47,15 @@
             transform: translateX(-100%);
         }
 
-        #config-view.collapsed + #toggle-btn {
-    left: 0px;
-}
+        #config-view.collapsed+#toggle-btn {
+            left: 0px;
+        }
 
         #toggle-btn {
-            position: absolute; top: 20px; left: 340px;
-    transition: left 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+            position: absolute;
+            top: 20px;
+            left: 340px;
+            transition: left 0.3s cubic-bezier(0.25, 1, 0.5, 1);
             top: 20px;
             right: -36px;
             width: 36px;
@@ -245,6 +247,10 @@
         body.exhibition-mode #config-view {
             display: none !important;
         }
+
+        body.exhibition-mode #toggle-btn {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -324,8 +330,8 @@
 
         <button class="btn-generate" id="btn-generate-url">Share Exhibition</button>
     </div>
-    
-        <button id="toggle-btn" title="Toggle Configuration">◀</button>
+
+    <button id="toggle-btn" title="Toggle Configuration">◀</button>
     <canvas id="pond"></canvas>
 
     <script>
