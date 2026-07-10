@@ -311,7 +311,7 @@ export class Fish {
 
         const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * fracPart +
             (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * fracPart * fracPart +
-            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * fracPart * fracPart * fracPart);
+            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * fracPart * fracPart * fracPart); 
 
         const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * fracPart +
             (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * fracPart * fracPart +
@@ -468,6 +468,7 @@ export class Fish {
     public schooling(grid: Fish[][], width: number, height: number) {
         this.handleBoundaries(width, height);
 
+        const fieldData = this.getBilinearField(this.headPos.x, this.headPos.y);
         const sepForce = new Vector2D(0, 0);
         let sepCount = 0;
 
@@ -482,10 +483,16 @@ export class Fish {
         const dyHome = this.homePos.y - this.headPos.y;
         const distToHome = Math.sqrt(dxHome * dxHome + dyHome * dyHome);
 
+        // Keep muscle pool full and dynamic everywhere
         let maxForceScaled = this.config.maxForce;
 
         const focusScalar = this.config.mosaicFocus / 100.0;
-        const boidShroudFactor = 1.0 - (focusScalar * 0.82);
+        let boidShroudFactor = 1.0 - (focusScalar * 0.82);
+        
+        // Suppress schooling weights for typography layer to keep contours sharp
+        if (this.isForeground) {
+            boidShroudFactor *= 0.15;
+        }
 
         const cellSize = visualRange;
         const cols = Math.ceil(width / cellSize);
@@ -523,7 +530,6 @@ export class Fish {
                     const distSq = dx * dx + dy * dy;
 
                     if (distSq > 0) {
-                        // Compute color variables globally inside the neighborhood loop
                         const dR1 = this.bodyColor[0] - other.bodyColor[0];
                         const dG1 = this.bodyColor[1] - other.bodyColor[1];
                         const dB1 = this.bodyColor[2] - other.bodyColor[2];
@@ -537,6 +543,7 @@ export class Fish {
                         const totalColorMatch = (bodyMatch * (1.0 - this.spotCoverage)) + (finMatch * this.spotCoverage);
                         const colorMismatch = 1.0 - totalColorMatch;
 
+                        // Phase separation - push back violently against foreign color matrices
                         const dynamicProtectedRangeSq = protectedRangeSq * (1.0 + colorMismatch * 3.0 * focusScalar);
 
                         if (distSq < dynamicProtectedRangeSq) {
@@ -604,7 +611,16 @@ export class Fish {
         if (this.config.mosaicFocus > 0 && distToHome > 4.0) {
             const homeTargetDir = new Vector2D(dxHome, dyHome);
             
-            const tetherFactor = Math.pow(Math.min(1.0, distToHome / 45.0), 3) * focusScalar;
+            let tetherFactor = 0.0;
+            if (this.isForeground) {
+                // Dual-role text steering constraint: if outside character stroke, pull back instantly.
+                // If safe inside, apply a very soft ambient nudge to evenly populate text geometry.
+                tetherFactor = fieldData.distance > 0.0 ? focusScalar : focusScalar * 0.15;
+            } else {
+                // Background landscape nodes enjoy open-sandbox cubic roaming
+                tetherFactor = Math.pow(Math.min(1.0, distToHome / 45.0), 3) * focusScalar;
+            }
+
             const steerHome = homeTargetDir.normalise().scale(this.config.maxSpeed * this.currentScale).sub(this.velocity).limit(maxForceScaled * 4.0 * tetherFactor);
             this.applyForce(steerHome);
         }
@@ -617,7 +633,6 @@ export class Fish {
             this.applyForce(lateralWeaveForce);
         }
 
-        const fieldData = this.getBilinearField(this.headPos.x, this.headPos.y);
 
         const flowVec = new Vector2D(Math.cos(fieldData.angle), Math.sin(fieldData.angle));
         let maxSpeedScaled = this.config.maxSpeed * this.currentScale;
@@ -625,6 +640,7 @@ export class Fish {
         const flowForce = flowVec.sub(this.velocity).limit(maxForceScaled * 1.8 * focusScalar);
         this.applyForce(flowForce);
 
+        // Universalized 6th-power potential field edge bounce
         if (fieldData.distance > 0.0) {
             const homeDir = new Vector2D(this.homePos.x - this.headPos.x, this.homePos.y - this.headPos.y);
             if (homeDir.magnitude() > 0) {
@@ -704,7 +720,8 @@ export class Fish {
 
         let maxForceScaled = this.config.maxForce;
 
-        if (this.config.mosaicFocus > 0) {
+        // Bypass velocity damping adjustments for text layer to avoid particle freeze
+        if (this.config.mosaicFocus > 0 && !this.isForeground) {
             const dx = this.homePos.x - this.headPos.x;
             const dy = this.homePos.y - this.headPos.y;
             const distToHome = Math.sqrt(dx * dx + dy * dy);
