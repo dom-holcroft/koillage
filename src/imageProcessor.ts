@@ -97,7 +97,6 @@ export class ImageProcessor {
         const hasBgImage = source.type === 'image' || source.type === 'composite';
         const hasFgText = source.type === 'text' || source.type === 'composite';
 
-        // Establish uniform default layout coordinate spaces
         let virtualW = 1920;
         let virtualH = 1080;
         let img: HTMLImageElement | null = null;
@@ -129,7 +128,6 @@ export class ImageProcessor {
         }
         const highResBgData = bgCtx.getImageData(0, 0, virtualW, virtualH).data;
 
-        // 2. Build Virtual Centered Typography Mask Layer
         const textCanvas = document.createElement("canvas");
         textCanvas.width = virtualW; textCanvas.height = virtualH;
         const textCtx = textCanvas.getContext("2d", { willReadFrequently: true })!;
@@ -192,10 +190,14 @@ export class ImageProcessor {
                 const gradX = getLuminance(cRight, fBgData) - getLuminance(cLeft, fBgData);
                 const gradY = getLuminance(rBot, fBgData) - getLuminance(rTop, fBgData);
 
-                bgAngles[idx] = Math.atan2(gradX, -gradY);
-                bgDistances[idx] = 0;
-                isTextEdge[idx] = fTextData[idx * 4] > 100 ? 1 : 0;
                 const edgeMag = Math.sqrt(gradX * gradX + gradY * gradY);
+                if (edgeMag < 0.01) {
+                    bgAngles[idx] = Math.random() * Math.PI * 2; // Inject randomized heading to avoid right-ward lockups
+                } else {
+                    bgAngles[idx] = Math.atan2(gradX, -gradY);
+                }
+
+                isTextEdge[idx] = fTextData[idx * 4] > 100 ? 1 : 0;
                 bgDistances[idx] = Math.min(1.0, edgeMag / 150.0);
             }
         }
@@ -233,9 +235,13 @@ export class ImageProcessor {
                 const gradX = fgDistances[cRight] - fgDistances[cLeft];
                 const gradY = fgDistances[rBot] - fgDistances[rTop];
 
-                const continuousDoubledAngle = Math.atan2(gradX, -gradY) * 2.0;
-                let sinSum = Math.sin(continuousDoubledAngle), cosSum = Math.cos(continuousDoubledAngle);
-                fgAngles[idx] = Math.atan2(sinSum, cosSum) / 2.0;
+                const edgeMag = Math.sqrt(gradX * gradX + gradY * gradY);
+                if (edgeMag < 0.01) {
+                    fgAngles[idx] = Math.random() * Math.PI * 2;
+                } else {
+                    // Retain full 360-degree range so fish track around boundaries in full circles
+                    fgAngles[idx] = Math.atan2(gradX, -gradY);
+                }
             }
         }
 
